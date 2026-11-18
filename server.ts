@@ -117,26 +117,46 @@ function mapThinkingLevel(model: string, depth?: string): ThinkingLevel | undefi
   }
 }
 
+function extractReadableError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: string } };
+    if (parsed?.error?.message) {
+      // Handle double-encoded JSON error message from SDK
+      try {
+        const inner = JSON.parse(parsed.error.message) as { error?: { message?: string } };
+        if (inner?.error?.message) return inner.error.message;
+      } catch {
+        // Not double-encoded
+      }
+      return parsed.error.message;
+    }
+  } catch {
+    // Not JSON
+  }
+  return raw;
+}
+
 function formatGeminiError(err: unknown): { status: number; message: string } {
   const raw = err instanceof Error ? err.message : String(err);
-  const lower = raw.toLowerCase();
+  const readable = extractReadableError(raw);
+  const lower = readable.toLowerCase();
 
   if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('401')) {
     return {
       status: 400,
-      message: 'The configured Gemini API key appears invalid. Verify your GEMINI_API_KEY in Settings > Secrets.',
+      message: 'The configured Gemini API key appears invalid. Verify your GEMINI_API_KEY in AI Studio Settings > Secrets.',
     };
   }
-  if (lower.includes('permission_denied') || lower.includes('403')) {
+  if (lower.includes('permission_denied') || lower.includes('403') || lower.includes('free tier is not available')) {
     return {
       status: 403,
-      message: 'Permission denied by Gemini API. Check your GEMINI_API_KEY permissions in Settings > Secrets.',
+      message: `${readable} Please select or update your GEMINI_API_KEY in AI Studio Settings > Secrets.`,
     };
   }
   if (lower.includes('resource_exhausted') || lower.includes('429') || lower.includes('quota')) {
     return {
       status: 429,
-      message: 'Gemini API quota exceeded (429). If using a paid-tier model, ensure a billing-enabled key is configured in Settings > Secrets, or switch to Gemini 4 Hydrogen.',
+      message: 'Gemini API quota exceeded (429). Check your quota or select a billing-enabled key in AI Studio Settings > Secrets.',
     };
   }
   if (lower.includes('not_found') || lower.includes('404')) {
@@ -147,7 +167,7 @@ function formatGeminiError(err: unknown): { status: number; message: string } {
   }
   return {
     status: 500,
-    message: raw || 'An unexpected error occurred while communicating with Gemini.',
+    message: readable || 'An unexpected error occurred while communicating with Gemini.',
   };
 }
 
@@ -430,10 +450,13 @@ async function startServer() {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
 
     let aborted = false;
-    req.on('close', () => {
-      aborted = true;
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        aborted = true;
+      }
     });
 
     const sendEvent = (payload: Record<string, unknown>) => {
@@ -641,10 +664,13 @@ async function startServer() {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
 
     let aborted = false;
-    req.on('close', () => {
-      aborted = true;
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        aborted = true;
+      }
     });
 
     const sendEvent = (payload: Record<string, unknown>) => {

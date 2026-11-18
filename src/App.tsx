@@ -193,7 +193,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void checkApiStatus(false);
+    void checkApiStatus(true);
     void fetchModels();
   }, [checkApiStatus, fetchModels]);
 
@@ -249,7 +249,12 @@ export default function App() {
       text: string,
       attachments: FileAttachment[] = [],
       useWebSearch = settings.useWebSearchInChat,
-      options?: { speakReply?: boolean; targetConvId?: string; baseMessages?: ChatMessage[] }
+      options?: {
+        speakReply?: boolean;
+        targetConvId?: string;
+        baseMessages?: ChatMessage[];
+        forceNew?: boolean;
+      }
     ) => {
       if (isGenerating) return;
       const trimmed = text.trim();
@@ -259,10 +264,14 @@ export default function App() {
       playHudTone('send', settings.soundEffects);
       speakOnCompleteRef.current = Boolean(options?.speakReply);
 
-      let convId = options?.targetConvId || activeConversationId;
-      if (!convId || !conversations.some((c) => c.id === convId)) {
-        convId = createNewConversation();
-      }
+      const existingConv =
+        !options?.forceNew && (options?.targetConvId || activeConversationId)
+          ? conversations.find((c) => c.id === (options?.targetConvId || activeConversationId))
+          : undefined;
+
+      const convId =
+        existingConv?.id ||
+        `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
       const userMsg: ChatMessage = {
         id: `msg_${Date.now()}_u`,
@@ -281,25 +290,37 @@ export default function App() {
         model: settings.model,
       };
 
-      let historyForRequest: ChatMessage[] = [];
+      const priorMessages = options?.baseMessages ?? existingConv?.messages ?? [];
+      const historyForRequest: ChatMessage[] = [...priorMessages, userMsg];
+      const computedTitle =
+        priorMessages.length === 0
+          ? (trimmed || attachments[0]?.name || 'New Session').slice(0, 48)
+          : existingConv?.title || 'New Session';
 
-      setConversations((prev) =>
-        prev.map((conv) => {
-          if (conv.id !== convId) return conv;
-          const prior = options?.baseMessages ?? conv.messages;
-          historyForRequest = [...prior, userMsg];
-          const nextTitle =
-            prior.length === 0
-              ? (trimmed || attachments[0]?.name || 'New Session').slice(0, 48)
-              : conv.title;
-          return {
-            ...conv,
-            title: nextTitle,
-            updatedAt: Date.now(),
-            messages: [...prior, userMsg, assistantPlaceholder],
-          };
-        })
-      );
+      if (existingConv) {
+        setConversations((prev) =>
+          prev.map((conv) =>
+            conv.id === convId
+              ? {
+                  ...conv,
+                  title: computedTitle,
+                  updatedAt: Date.now(),
+                  messages: [...priorMessages, userMsg, assistantPlaceholder],
+                }
+              : conv
+          )
+        );
+      } else {
+        const newConv: Conversation = {
+          id: convId,
+          title: computedTitle,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messages: [userMsg, assistantPlaceholder],
+        };
+        setConversations((prev) => [newConv, ...prev]);
+        setActiveConversationId(convId);
+      }
 
       setIsGenerating(true);
       const controller = new AbortController();
@@ -361,6 +382,9 @@ export default function App() {
             setIsGenerating(false);
             voice.setVoiceState('error');
             playHudTone('error', settings.soundEffects);
+            if (/api key|permission|free tier|secrets|quota/i.test(message)) {
+              setApiStatus((prev) => ({ ...prev, connected: false, error: message }));
+            }
             setConversations((prev) =>
               prev.map((conv) => {
                 if (conv.id !== convId) return conv;
@@ -390,7 +414,6 @@ export default function App() {
     [
       activeConversationId,
       conversations,
-      createNewConversation,
       isGenerating,
       memories,
       settings,
@@ -674,9 +697,8 @@ export default function App() {
               memoryCount={activeMemoryCount}
               voiceSupported={voice.capabilities.recognitionSupported}
               onSubmitPrompt={(prompt, atts, useSearch) => {
-                const newId = createNewConversation();
                 setActiveSection('chat');
-                void sendChatMessage(prompt, atts || [], useSearch, { targetConvId: newId });
+                void sendChatMessage(prompt, atts || [], useSearch, { forceNew: true });
               }}
               onNavigate={navigate}
               onOpenTool={(toolId) => {
