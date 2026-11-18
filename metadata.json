@@ -1,0 +1,6 @@
+{
+  "name": "JARVIS AI",
+  "description": "Futuristic AI personal assistant command center powered by Google Gemini with streaming chat, voice interaction, memory management, web search grounding, multimodal file analysis, and specialized AI tools.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
