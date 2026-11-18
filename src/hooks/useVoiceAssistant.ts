@@ -117,8 +117,15 @@ export function useVoiceAssistant(options: {
 
     if (synthesisSupported) {
       const loadVoices = () => {
-        const list = window.speechSynthesis.getVoices();
-        setVoices(list);
+        const rawList = window.speechSynthesis.getVoices();
+        const seen = new Set<string>();
+        const unique = rawList.filter((v) => {
+          const sig = `${v.voiceURI}::${v.name}::${v.lang}`;
+          if (seen.has(sig)) return false;
+          seen.add(sig);
+          return true;
+        });
+        setVoices(unique);
       };
       loadVoices();
       window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
